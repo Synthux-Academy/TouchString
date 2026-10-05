@@ -43,6 +43,17 @@ public:
     Has no effect in case of syncing to extrnal clock.
     */
     void SetTempo(const float norm_value);
+    void SetBpm(const float bpm) {
+        _manual_tempo = (bpm < kBPMMin) ? kBPMMin : ((bpm > kBPMMin + kBPMRange) ? (kBPMMin + kBPMRange) : bpm);
+        _tempo_mks = _get_tempo_mks(_manual_tempo);
+        const auto clock_off_offset = 10.0f;
+        _raw_manual_tempo = (_manual_tempo - kBPMMin + clock_off_offset) / (kBPMRange - clock_off_offset);
+        if (_raw_manual_tempo < 0.0f) _raw_manual_tempo = 0.0f;
+        if (_raw_manual_tempo > 1.0f) _raw_manual_tempo = 1.0f;
+        if (_is_running) {
+            _reset();
+        }
+    }
 
     /*
     In case of external clock sync this

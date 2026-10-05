@@ -15,6 +15,12 @@ public:
     ~Latch() = default;
 
     bool on() const { return _on; }
+    bool is_held(const uint8_t num) const { return num < note_count && _note_hold.test(num); }
+
+    void clear() {
+        _note_on.reset();
+        _note_hold.reset();
+    }
 
     void set_on(const bool on) { 
         auto was_on = _on;

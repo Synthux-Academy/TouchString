@@ -18,12 +18,14 @@ void AudioCallback(
 	AudioHandle::InputBuffer in, 
 	AudioHandle::OutputBuffer out, 
 	size_t size) {
-	engine.Process(out, size);
+	engine.Process(in, out, size);
 };
 
 int main(void) {
 	hw.Init();
-	hw.SetAudioBlockSize(4);
+	// 48-sample block size (~1.0ms @ 48kHz) optimizes CPU interrupt overhead
+	// for 7-voice physical modeling waveguides while preserving sub-millisecond touch latency.
+	hw.SetAudioBlockSize(48);
 	hw.SetAudioSampleRate(SaiHandle::Config::SampleRate::SAI_48KHZ);
 
 	#if DEBUG
@@ -32,6 +34,11 @@ int main(void) {
 	#endif
 
 	touch.Init(hw);
+	// Warm up MPR121 baseline tracking filter so capacitance settles before processing touch events
+	for (int i = 0; i < 40; i++) {
+		touch.Process();
+		System::Delay(3);
+	}
 	engine.Init(hw.AudioSampleRate(), hw.AudioBlockSize());
 	ui.Init(hw);
 

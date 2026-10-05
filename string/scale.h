@@ -17,19 +17,21 @@ public:
   }
 
   void SetScaleIndex(uint8_t index) {
-    if (index != _scale_index) {
+    if (index < kStringScalesCount && index != _scale_index) {
       _scale_index = index;
       _PrepareScale();
     }
   }
 
   float TransMult(const float value) {
-    auto new_trans_index = static_cast<uint8_t>(value * (_trans.size() - 1));
+    auto new_trans_index = static_cast<uint8_t>(value * (_trans.size() - 1) + 0.5f);
+    if (new_trans_index >= _trans.size()) new_trans_index = _trans.size() - 1;
     return _trans[new_trans_index];
   }
 
   float FreqAt(uint8_t idx) {
-    return _scale[idx] * 0.5f;
+    if (idx >= kStringScaleSize) idx = kStringScaleSize - 1;
+    return _scale[idx];
   }
 
   float Random() {
@@ -54,22 +56,12 @@ private:
 
   std::array<float, kStringScaleSize> _scale;
 
-  std::array<float, 25> _trans = {
-    0.5f,
-    0.52973154717962f,
-    0.56123102415466f,  0.594603557501335f,
-    0.629960524947413f, 0.667419927084995f,
-    0.707106781186527f, 0.749153538438323f,
-    0.793700525984085f, 0.840896415253703f,
-    0.890898718140331f, 0.943874312681689f,
-    1.f,
-    1.0594630943593f,   1.12246204830938f,
-    1.18920711500273f,  1.25992104989489f,
-    1.33483985417006f,  1.41421356237313f,
-    1.49830707687673f,  1.58740105196826f,
-    1.6817928305075f,   1.78179743628076f,
-    1.88774862536348f,
-    2.f
+  static constexpr std::array<float, 25> _trans = {
+    0.50000000f, 0.52973155f, 0.56123102f, 0.59460356f, 0.62996052f, 0.66741993f,
+    0.70710678f, 0.74915354f, 0.79370053f, 0.84089642f, 0.89089872f, 0.94387431f,
+    1.00000000f, // Center (0 semitones / unison root note)
+    1.05946309f, 1.12246205f, 1.18920712f, 1.25992105f, 1.33483985f, 1.41421356f,
+    1.49830708f, 1.58740105f, 1.68179283f, 1.78179744f, 1.88774863f, 2.00000000f
   };
 };
 

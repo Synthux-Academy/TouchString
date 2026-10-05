@@ -18,6 +18,13 @@ void Set(const float value) {
   _value = value;
 }
 
+void SetTracking(const float value) {
+  _is_tracking = true;
+  _is_active = true;
+  _value = value;
+  _init_value = value;
+}
+
 private:
   NOCOPY(MValue)
 
