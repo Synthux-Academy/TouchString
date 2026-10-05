@@ -1,4 +1,4 @@
-# This is TouchString(s)
+# This is TouchString
 
 Polyphonic physical modeling string synthesizer for the Synthux Touch synthesizer and Daisy Seed.
 
