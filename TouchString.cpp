@@ -4,6 +4,10 @@
 #include "ui/string_ui.h"
 #include "log.h"
 
+const char* USBD_MANUFACTURER_STRING = "Synthux";
+const char* USBD_PRODUCT_STRING_HS = "TouchString";
+const char* USBD_PRODUCT_STRING_FS = "TouchString";
+
 using namespace daisy;
 using namespace synthux;
 

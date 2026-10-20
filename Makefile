@@ -20,6 +20,10 @@ include $(SYSTEM_FILES_DIR)/Makefile
 
 CPP_STANDARD = -std=gnu++17
 
+# Bare-metal firmware has no OS loader enforcing W^X on ELF program
+# headers, so the RWX LOAD segment warning (binutils >= 2.39) is cosmetic.
+LDFLAGS += -Wl,--no-warn-rwx-segments
+
 libs:
 	cd $(LIBDAISY_DIR) && $(MAKE)
 	cd $(DAISYSP_DIR) && $(MAKE)

@@ -16,8 +16,9 @@ Flash the precompiled [**TouchString.bin** (v2.1.0)](https://github.com/vincentl
 - **P03...P09** - Note pads (strings 1 to 7)
 - **P10 (TO)** - Tap tempo & Modifier:
   - **Tap P10** in rhythm to set arpeggiator tempo (40–240 BPM)
-  - Hold P10 + P00 - Tempo down
-  - Hold P10 + P02 - Tempo up
+  - Hold P10 + P00 - Tempo down (−10 BPM)
+  - Hold P10 + P02 - Tempo up (+10 BPM)
+  - Hold P10 + P03 - Toggle external MIDI clock sync (4 quick blinks = External, 1 long blink = Internal)
   - Hold P10 + S33 - Pattern Shift
   - Hold P10 + S35 - Reverb Mix
   - Hold P10 + S36 - External Audio Input Volume
@@ -82,6 +83,7 @@ The onboard LED provides rich visual feedback:
   - *-1 / -2 Octaves*: 1 or 2 slow pulses
 - **Voice Mode**: Double blink = Mono, single long blink = Poly.
 - **Tap Tempo**: Flashes instantly on valid taps to confirm tempo sync.
+- **Clock Source**: 4 quick blinks = external MIDI clock sync on, 1 long blink = back to internal clock.
 - **Recalibration**: 3 rapid blinks confirm capacitive sensor baseline reset.
 
 ## Project Structure

@@ -44,6 +44,8 @@ void StringUI::Process(DaisySeed& hw) {
     _touch.Process();
     _is_to_touched = _touch.pads().IsTouched(10);
     _is_ch_touched = _touch.pads().IsTouched(11);
+    // Recalibration clears pad state without release callbacks
+    if (!_touch.pads().IsTouched(kFirstNotePad)) _is_ext_sync_pad_held = false;
 
     // Baseline Recalibration: Touch both modifier pads (P10 & P11) simultaneously for ~0.5s
     if (_is_to_touched && _is_ch_touched) {
@@ -71,6 +73,12 @@ void StringUI::Process(DaisySeed& hw) {
         auto initial_s35 = _touch.knobs().s35().Process();
         _human_string_value.SetTracking(initial_s35);
         _string.SetHumanStringChance(initial_s35);
+
+        _brightness_value.SetTracking(_touch.knobs().s30().Process());
+        _transp_value.SetTracking(_touch.knobs().s31().Process());
+        _structure_value.SetTracking(_touch.knobs().s32().Process());
+        _note_chance_value.SetTracking(_touch.knobs().s34().Process());
+        _damping_value.SetTracking(_touch.knobs().s37().Process());
     }
 
     // Arpeggiator (Switch 2 / Right switch) .....................
@@ -98,7 +106,7 @@ void StringUI::Process(DaisySeed& hw) {
     if (arp_just_enabled) {
         for (uint8_t i = 0; i < 7; i++) {
             uint16_t p_idx = i + kFirstNotePad;
-            if (_touch.pads().IsTouched(p_idx)) {
+            if (_is_note_pad_touched(i)) {
                 _string.NoteOn(i, _touch.pads().Velocity(p_idx));
             }
         }
@@ -122,7 +130,7 @@ void StringUI::Process(DaisySeed& hw) {
 
         for (uint8_t i = 0; i < 7; i++) {
             uint16_t p_idx = i + kFirstNotePad;
-            bool touched = _touch.pads().IsTouched(p_idx);
+            bool touched = _is_note_pad_touched(i);
             float press = touched ? _touch.pads().Pressure(p_idx) : 0.0f;
             _string.SetPadPressure(i, press);
 
@@ -168,16 +176,18 @@ void StringUI::Process(DaisySeed& hw) {
         }
     }
 
+    // Single-layer knobs are always active; after a MIDI CC Set()
+    // they only take over again once physically moved.
     // Pitch (real-time) ..........................................
-    _string.SetTransp(_touch.knobs().s31().Process());
+    _string.SetTransp(_transp_value.Process(_touch.knobs().s31().Process(), true));
 
-    // Timbre (sample-and-hold at pluck time) .....................
-    _string.SetDamping(_touch.knobs().s37().Process());
-    _string.SetStructure(_touch.knobs().s32().Process());
-    _string.SetBrightness(_touch.knobs().s30().Process());
+    // Timbre (real-time) .........................................
+    _string.SetDamping(_damping_value.Process(_touch.knobs().s37().Process(), true));
+    _string.SetStructure(_structure_value.Process(_touch.knobs().s32().Process(), true));
+    _string.SetBrightness(_brightness_value.Process(_touch.knobs().s30().Process(), true));
 
     // Note randomization (arp only) ..............................
-    _string.SetHumanNoteChance(_touch.knobs().s34().Process());
+    _string.SetHumanNoteChance(_note_chance_value.Process(_touch.knobs().s34().Process(), true));
 
     // Human string chance <-> reverb mix .........................
     auto human_verb_knob_value = _touch.knobs().s35().Process();
@@ -304,6 +314,17 @@ void StringUI::_on_pad_touch(uint16_t pad) {
         _set_scale(pad - kFirstNotePad);
         return;
     }
+    if (pad == kFirstNotePad && (_touch.pads().IsTouched(10) || _is_to_touched)) {
+        // TO + P03: toggle external (MIDI) clock sync
+        _is_ext_sync_pad_held = true;
+        _string.ToggleExternalClock();
+        if (_string.IsExternalClock()) {
+            _trigger_blink_pattern(4, 5, 5);  // 4 quick blinks = External sync ON
+        } else {
+            _trigger_blink_pattern(1, 50, 0); // 1 long blink = Internal clock
+        }
+        return;
+    }
     auto note_num = pad - kFirstNotePad;
     // In Bow mode, continuous pressure directly seeds bowing so feather touches swell smoothly from zero
     float vel = (_exciter_mode == 2) ? _touch.pads().Pressure(pad) : _touch.pads().Velocity(pad);
@@ -317,6 +338,10 @@ void StringUI::_on_pad_release(uint16_t pad) {
         return;
     }
     if (pad < kFirstNotePad || pad >= kFirstNotePad + String::kVoicesCount) return;
+    if (pad == kFirstNotePad && _is_ext_sync_pad_held) {
+        _is_ext_sync_pad_held = false;
+        return;
+    }
     auto note_num = pad - kFirstNotePad;
     _hold_ticks[note_num] = 0;
     _string.NoteOff(note_num);
@@ -324,7 +349,6 @@ void StringUI::_on_pad_release(uint16_t pad) {
 
 #ifdef USB_MIDI
 void StringUI::_process_midi() {
-    _string.ProcessClockIn(false);
     _midi.Listen();
     while(_midi.HasEvents()) {
         auto msg = _midi.PopEvent();
@@ -332,7 +356,7 @@ void StringUI::_process_midi() {
             case SystemRealTime: {
                 switch (msg.srt_type) {
                     case TimingClock: {
-                        _string.ProcessClockIn(true);
+                        _string.PushExternalClockPulse();
                     }
                     break;
                     default: break;
@@ -346,16 +370,16 @@ void StringUI::_process_midi() {
                 auto ctrl_msg = msg.AsControlChange();
                 auto num = ctrl_msg.control_number;
                 auto norm_value = norm(ctrl_msg.value);
-                if (num == 70) { _string.SetBrightness(norm_value); }         // brightness
-                else if (num == 71) { _string.SetTransp(norm_value); }       // transpose
-                else if (num == 72) { _string.SetStructure(norm_value); }    // structure
+                if (num == 70) { _brightness_value.Set(norm_value); _string.SetBrightness(norm_value); }         // brightness
+                else if (num == 71) { _transp_value.Set(norm_value); _string.SetTransp(norm_value); }       // transpose
+                else if (num == 72) { _structure_value.Set(norm_value); _string.SetStructure(norm_value); }    // structure
                 else if (num == 73) { _pattern_value.Set(norm_value); _string.SetPattern(norm_value); }        // pattern
-                else if (num == 74) { _string.SetHumanNoteChance(norm_value); } // note randomization
+                else if (num == 74) { _note_chance_value.Set(norm_value); _string.SetHumanNoteChance(norm_value); } // note randomization
                 else if (num == 75) { _human_string_value.Set(norm_value); _string.SetHumanStringChance(norm_value); } // string randomization
-                else if (num == 76) { _string.SetDamping(norm_value); }      // damping
+                else if (num == 76) { _damping_value.Set(norm_value); _string.SetDamping(norm_value); }      // damping
                 else if (num == 77) { _verb_value.Set(norm_value); _string.SetReverbMix(norm_value); }          // reverb
                 else if (num == 78) { _shift_value.Set(norm_value); _string.SetPatternShift(norm_value); }      // pattern shift
-                else if (num == 79) { _string.SetDrive(norm_value); }        // drive
+                else if (num == 79) { _drive_value.Set(norm_value); _string.SetDrive(norm_value); }        // drive
                 else if (num == 123) { _string.Reset(); }
             }
             break;
