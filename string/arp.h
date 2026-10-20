@@ -168,6 +168,11 @@ namespace synthux {
       }
       _pulse_counter = ppqn / 4;
       _current_idx = 0;
+      // The note list is empty again, so the bottom of the chain is the
+      // sentinel. Left pointing at an emptied slot, the next NoteOn() links
+      // through its kUnlinked prev and writes past _notes[].
+      _bottom_idx = 0;
+      _played_idx = 0;
     }
 
   private:
