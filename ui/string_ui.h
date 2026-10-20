@@ -28,7 +28,8 @@ public:
     _beat_pulse_timer { 0 },
     _last_to_touch_time { 0 },
     _recal_counter { 0 },
-    _recal_latched { false }
+    _recal_latched { false },
+    _is_ext_sync_pad_held { false }
      {
          _hold_ticks.fill(0);
      }
@@ -124,6 +125,12 @@ private:
         _string.SetCurrentOctaveMult(mult);
     }
 
+    // P03 touched as part of the TO + P03 external sync gesture is not a note
+    bool _is_note_pad_touched(uint8_t note_num) const {
+        if (note_num == 0 && _is_ext_sync_pad_held) return false;
+        return _touch.pads().IsTouched(note_num + kFirstNotePad);
+    }
+
     void _on_pad_touch(uint16_t pad);
     void _on_pad_release(uint16_t pad);
 
@@ -169,6 +176,7 @@ private:
     uint32_t _last_to_touch_time;
     uint16_t _recal_counter;
     bool _recal_latched;
+    bool _is_ext_sync_pad_held;
 };
 
 };

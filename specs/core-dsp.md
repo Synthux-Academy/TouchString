@@ -10,7 +10,7 @@ The sound engine: class `synthux::String` ([string/string.h](../string/string.h)
 | `vox.h` | `Vox` | One voice: exciter (pluck burst + bow friction + ext input) → SVF LP → `FastString` → DC block |
 | `vox.h` | `FastString` | Extended Karplus-Strong waveguide (optimised port of Mutable Instruments *Rings* `String`) |
 | `scale.h/.cpp` | `Scale` | Current scale frequencies + ±12 semitone transpose table |
-| `synclock.h/.cpp` | `SynClock` | Internal clock (48 PPQN) with external-clock (24 PPQN) sync |
+| `synclock.h/.cpp` | `bleeptools::SynClock` | Internal clock (48 PPQN) with explicit external-clock (24 PPQN) sync — copied from Spotykach MK II `src/core/synclock.*` |
 | `trigger.h/.cpp` | `Trigger` | Divides clock to 16th notes (swing supported, unused) |
 | `cpattern.h/.cpp` | `CPattern` | 16-step Euclidean/Christoffel rhythm with rotation |
 | `arp.h` | `Arp<8,4>` | Note list (sorted linked list + input order), as-played stepping |
@@ -34,7 +34,7 @@ Mono:  Vox[0].Process(ext) × 0.7071 (both channels) ┘
    → out = SoftLimit(bus + wet)       (dry is always 100 %; "mix" is really a send level)
 ```
 
-`SynClock::Tick()` is called once at the top of every block (1 ms), so arp events are block-quantised.
+`String::_process_clock()` runs once at the top of every block (1 ms) and calls `SynClock::tick()`, so arp events are block-quantised.
 
 Pan law tables (`kPanL/kPanR`) map pads left→right: v0 far L, v1 mid L, v2 centre, v3 mid R, v4 far R, v5 centre-L, v6 centre-R.
 
@@ -118,21 +118,32 @@ Changing mode zeroes bow pressure and sustain on all voices.
 `soft_scale` also scales note velocity (`vel·(0.15 + 0.85·soft)`) and arp bow pressure (`·(0.25 + 0.75·soft)`).
 
 ### 4.5 `Reset()`
-Stops clock (if arp off), resets trigger/pattern, clears arp + latch, clears mono stack, sets all `_voice_oct_mult` to current octave, clears humanize offsets, zeroes sustain/bow/aftertouch on all voices. Called on arp on/off transitions, when the arp runs out of notes, from `SetLatch` whenever arp is on with no notes (i.e. every UI loop while idle), and by MIDI CC 123.
+Resets trigger/pattern, clears arp + latch, clears mono stack, sets all `_voice_oct_mult` to current octave, clears humanize offsets, zeroes sustain/bow/aftertouch on all voices. Called on arp on/off transitions, when the arp runs out of notes, from `SetLatch` whenever arp is on with no notes (i.e. every UI loop while idle), and by MIDI CC 123.
 
 ## 5. Sequencing (arpeggiator)
 
-Chain (inside audio ISR): `SynClock` 48 PPQN tick → `String::_on_clock_tick` → beat pulse every 48 ticks → `Trigger::Tick()` (true every 12 ticks = 16th) **and** `CPattern::Tick()` (true if step is an onset) → `Arp::Trigger()` → `_on_arp_note_on/off`.
+Chain (inside audio ISR): `_process_clock()` → `SynClock` 48 PPQN tick → `String::_on_clock_tick` → beat pulse every 48 ticks → `Trigger::Tick()` (true every 12 ticks = 16th) **and** `CPattern::Tick()` (true if step is an onset) → `Arp::Trigger()` → `_on_arp_note_on/off`.
 
 ### 5.1 Note input path when arp is on
-`String::NoteOn(num)` → stores octave → `Latch::note_on` → `Arp::NoteOn(num, 127)`. Clock runs while the arp has notes. `NoteOff` → `Latch::note_off` → (if not latched) `Arp::NoteOff`; if arp empties → `Reset()`.
+`String::NoteOn(num)` → stores octave → `Latch::note_on` → `Arp::NoteOn(num, 127)`. The clock runs whenever the arp is on (`_is_arp_on`); it only produces notes while the arp holds notes. `NoteOff` → `Latch::note_off` → (if not latched) `Arp::NoteOff`; if arp empties → `Reset()`.
 
-### 5.2 `SynClock`
-- Driven by `Tick()` each audio block (`update_interval = 1e6·48/48000 = 1000 µs`).
-- Normalised tempo `n` → BPM = `190·n + 30`. Default `n = 0.45` → **115.5 BPM**.
-- `SpeedUp/SlowDown`: ±0.05 n (~±9.5 BPM), clamped to [0.05, 1].
-- `SetBpm(bpm)` (tap tempo): clamps 40–240, recomputes `n`, resets phase if running, raises beat pulse.
-- **External-clock mode** is implicit: when BPM < 40 (`n` < ~0.053). In that mode internal ticks only advance between external pulses (`Process(state)` rising edges, 24 PPQN → 2 internal ticks each) with tempo correction. ⚠️ `SlowDown` floor 0.05 ⇒ 39.5 BPM ⇒ external mode: tapping tempo-down to the bottom silently switches to MIDI clock sync and the arp stops until MIDI clock arrives (tap tempo or tempo-up exits it).
+### 5.2 `SynClock` and `_process_clock()`
+`bleeptools::SynClock` is a verbatim copy of Spotykach MK II's clock, so keep it diffable. TouchString-specific edits are marked `// TouchString:` (`_external_clock` initialised; `set_external_clock(false)` restores the manual tempo). API: `init(update_interval_mks, ppqn_out)`, `set_ppqn_in`, `set_tempo(bpm)` (ignores changes < 0.01 BPM), `run()` (resets; in external mode only arms), `stop()`, `reset()`, `tick(external_pulse)`, `set_external_clock(bool)`, `set_on_tick(void(bool external))`.
+
+**Threading rule:** only the audio callback touches `_clock`. Main-loop methods just record requests, which `String::_process_clock()` applies at the top of each block:
+
+| Main loop (UI/MIDI) | Field | Applied in `_process_clock()` |
+|---|---|---|
+| `SetBpm` (tap), `SpeedUp`/`SlowDown` | `_bpm` (40–240, default 120, step 10) | `set_tempo(_bpm)` every block while internal |
+| `SetBpm` | `_tempo_sync_request` | `reset()` + beat counter = 0 (realigns phase to the tap) |
+| `SetExternalClock` / `ToggleExternalClock` | `_is_ext_clock` | on change: `stop()`, `set_external_clock()`, drop pending pulses, reset trigger/pattern |
+| `SetArpOn` | `_is_arp_on` | `run()` / `stop()` on change (`_is_clock_started` mirrors it) |
+| `PushExternalClockPulse` (per MIDI 0xF8) | `_ext_pulses_received` (main-loop-only counter) | consumed one per block via `_ext_pulses_consumed` → `tick(true)`; otherwise `tick(false)` |
+
+- Internal mode: free-running from `_bpm`. Tempo changes made while external are stored and take effect when you switch back.
+- External mode: 24 PPQN in → 48 PPQN out (2 internal ticks per pulse, interpolated between pulses and tempo-corrected on each). After `run()`, ticking starts on the next pulse.
+- External dropout: if no pulse arrives for `_ext_timeout_blocks` (1 s) while the clock is started, it's re-armed (`stop()` + `run()`) and the trigger/pattern reset, so the rhythm restarts on the next pulse.
+- Up to 1 pulse per block is consumed (1 kHz), so bursts of MIDI clocks drained in one UI tick are queued, not lost.
 
 ### 5.3 `Trigger(48, Every::_16th)`
 Fires every 12 ticks. Swing is implemented (`SetSwing`) but never called → straight 16ths.
@@ -169,5 +180,5 @@ To add a scale: append a row, increment `kStringScalesCount`. UI direct-select o
 - `_humanize_and_apply` sets voice damping from raw `_damping` (ignoring soft-scale/choke); `_update_damping` corrects it on the next UI loop (~4 ms).
 - `SetBrightness/SetStructure/SetDamping` apply **live** to ringing voices (UI comments saying "sample-and-hold at pluck time" are stale).
 - `Overdrive` instance is shared by both channels — fine only because it is stateless.
-- Dead code (safe to remove for flash space): `String::SetNoteFreq`, `String::SetBowPressure`, `String::SetSustain`, `String::IsNoteLatched`, `String::_note_hold/_note_on`, `String::InputVolume`, `Vox::BowStroke`, `Vox::IsActive`, `Trigger::SetSwing`, `CPattern::SetMaxOnsets/Length`, `SynClock::Tempo`.
+- Dead code (safe to remove for flash space): `String::SetNoteFreq`, `String::SetBowPressure`, `String::SetSustain`, `String::IsNoteLatched`, `String::_note_hold/_note_on`, `String::InputVolume`, `Vox::BowStroke`, `Vox::IsActive`, `Trigger::SetSwing`, `CPattern::SetMaxOnsets/Length`, `SynClock::tempo()`/`ppqn_in()`.
 - `Latch::_on` has no initialiser; safe only because `String` is a global (zero-initialised). Initialise it if `String` is ever instantiated elsewhere.

@@ -97,7 +97,7 @@ make program           # ST-Link via openocd
 
 ## Flash budget
 
-Linker script `STM32H750IB_flash.lds` (`APP_TYPE = BOOT_NONE`, default): **FLASH 128 KiB = 131 072 B** at 0x08000000. Current binaries: `build/TouchString.bin` 127 960 B (97.6 %, after the CC soft-takeover change), committed root `TouchString.bin` 130 240 B (~0.8 KiB free). Effectively full.
+Linker script `STM32H750IB_flash.lds` (`APP_TYPE = BOOT_NONE`, default): **FLASH 128 KiB = 131 072 B** at 0x08000000. Current binaries: `build/TouchString.bin` 128 184 B (97.8 %, after the new clock), committed root `TouchString.bin` 130 240 B (~0.8 KiB free). Effectively full.
 
 Before adding features:
 - Check the size after `make` (`arm-none-eabi-size build/TouchString.elf`). Link errors like "region FLASH overflowed" mean you're over.

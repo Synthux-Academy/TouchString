@@ -7,7 +7,7 @@ MIDI is **USB-device, input-only**. Code: `StringUI::_process_midi()` in [ui/str
 - [common/config.h](../common/config.h): `#if !DEBUG → #define USB_MIDI`. A `DEBUG=1` build has **no MIDI** (the USB port is used for serial logging instead).
 - `StringUI` member `daisy::MidiUsbHandler _midi`, initialised with a default `MidiUsbHandler::Config` in `StringUI::Init` (internal USB FS, Seed micro-USB).
 - No UART/TRS MIDI is initialised. No MIDI output.
-- Polled once per UI tick (~4 ms) at the start of `StringUI::Process`: `ProcessClockIn(false)`, `_midi.Listen()`, then drain `HasEvents()/PopEvent()`.
+- Polled once per UI tick (~4 ms) at the start of `StringUI::Process`: `_midi.Listen()`, then drain `HasEvents()/PopEvent()`.
 - **No channel filtering** — messages on all 16 channels are accepted.
 
 ## 2. Implemented messages
@@ -31,7 +31,7 @@ MIDI is **USB-device, input-only**. Code: `StringUI::_process_midi()` in [ui/str
 Every CC with a knob counterpart stores its value via `MValue::Set` (soft takeover, [ui.md §5](ui.md#5-soft-takeover--mvalue-uimvalueh)): the CC value holds until the knob (on the matching layer) moves more than 0.02 from where it was when the CC arrived; from then on the knob controls the parameter again. Knob positions are not changed or reported back, so the first knob movement may jump from the CC value to the knob position.
 
 ### 2.2 System Real-Time
-- `TimingClock` (0xF8) → `String::ProcessClockIn(true)` → `SynClock::Process` rising edge → `_external_clock_tick()`.
+- `TimingClock` (0xF8) → `String::PushExternalClockPulse()` (see §3).
 - Start (0xFA) / Continue (0xFB) / Stop (0xFC) and Song Position are ignored.
 
 ### 2.3 Not handled
@@ -39,11 +39,12 @@ Note On/Off (explicit TODO: engine notes are scale-degree indices 0..6, not MIDI
 
 ## 3. External clock sync
 
-- `SynClock` is constructed with `ppqn_in = 24` (`kPPQNExtern`) and `ppqn_out = 48` (`kPPQN`): each MIDI clock allows 2 internal ticks; between pulses the internal clock free-runs at the estimated tempo and holds if it gets ahead, re-syncing and correcting `_tempo_mks` on every pulse (algorithm after Paul Messick's *Maximum MIDI*).
-- **External mode is active only when the internal tempo is < 40 BPM** (`_external_clock()` ⇔ `_manual_tempo < kBPMMin`). The UI has no explicit switch: tempo-down (TO + P00) to its floor (normalised 0.05 → 39.5 BPM) enters it. Tap tempo or tempo-up leaves it. While in external mode with no MIDI clock arriving, the arp is silent.
-- When entering external mode while running, the clock waits (`_is_about_to_run`) and starts on the next received pulse.
-- Edge detection limitation: `ProcessClockIn(false)` is sent once per tick and every `TimingClock` sends `true`, so **multiple clocks drained in the same tick collapse into one edge**. Fine at normal tempos (24 PPQN at 240 BPM = 10.4 ms/pulse), but loop jitter (I2C timeouts, recalibration's ~85 ms block) drops pulses. A robust fix is to call a dedicated `SynClock::_external_clock_tick()`-equivalent per message instead of edge-detecting a level.
-- Clock events are processed in the main loop, while `SynClock::Tick()` runs in the audio ISR — the same unsynchronised shared state as the rest of the engine.
+- **Engaged explicitly with TO + P03** (toggle; LED 4 quick blinks = external, 1 long blink = internal). Not persisted; boots in internal mode. Engine API: `String::SetExternalClock/ToggleExternalClock/IsExternalClock`.
+- Each `TimingClock` message calls `String::PushExternalClockPulse()` (increments a counter owned by the main loop). The audio callback consumes at most one pulse per 1 ms block and calls `SynClock::tick(true)`, so pulses arriving together in one UI poll are queued rather than merged. Pulses received while internal are discarded.
+- `bleeptools::SynClock` (from Spotykach MK II) with `ppqn_in = 24`, `ppqn_out = 48`: interpolates between pulses and corrects the tempo on every pulse. Details: [core-dsp.md §5.2](core-dsp.md#52-synclock-and-_process_clock).
+- The arp starts on the first pulse after the arp is switched on (or after enabling sync). If no pulse arrives for 1 s, the clock re-arms and the pattern restarts on the next pulse, so stopping and restarting the DAW realigns the arp.
+- While external, tap tempo and TO + P00/P02 only change the stored internal BPM; it applies after switching back to internal.
+- MIDI Start/Stop/Continue and Song Position are still ignored; sync follows clock pulses only.
 
 ## 4. Adding MIDI note input (recipe)
 

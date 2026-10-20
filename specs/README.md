@@ -9,7 +9,7 @@ Read this file first, then open only the spec you need.
 | [core-dsp.md](core-dsp.md) | `String` engine, `Vox` voice, `FastString` waveguide, exciter modes, poly/mono, master bus, arpeggiator / clock / pattern / latch, scales | `string/` |
 | [ui.md](ui.md) | `StringUI`: control mapping, modifier layers, pressure routing, soft takeover (`MValue`), LED feedback | `ui/` |
 | [hardware.md](hardware.md) | Pins, MPR121 touch controller, pad signal processing, ADC knobs, switches, audio config, build/flash/debug, flash budget | `touch/`, `TouchString.cpp`, `Makefile` |
-| [midi.md](midi.md) | USB MIDI input: CC map, clock sync, limitations | `ui/string_ui.cpp` (`_process_midi`), `string/synclock.*` |
+| [midi.md](midi.md) | USB MIDI input: CC map, clock sync (TO + P03), limitations | `ui/string_ui.cpp` (`_process_midi`), `string/synclock.*` |
 
 ## Architecture in one picture
 
@@ -17,7 +17,7 @@ Read this file first, then open only the spec you need.
  main loop (~4–5 ms/iter)                         audio ISR (48 kHz, 48-sample blocks = 1 ms)
  ─────────────────────────                         ───────────────────────────────────────────
  StringUI::Process(hw)                             AudioCallback → String::Process(in, out, n)
-   ├─ _process_midi()     (USB MIDI, if !DEBUG)       ├─ SynClock::Tick()  → _on_clock_tick()
+   ├─ _process_midi()     (USB MIDI, if !DEBUG)       ├─ _process_clock() → SynClock::tick() → _on_clock_tick()
    ├─ Touch::Process()    (MPR121 I2C burst read)     │      → Trigger → CPattern → Arp::Trigger()
    │    └─ Pads callbacks → _on_pad_touch/_release    │            → _on_arp_note_on/off → Vox
    ├─ read switches/knobs → String setters            └─ per sample: 7× Vox::Process → pan → body
@@ -30,7 +30,7 @@ Init order: `hw.Init()` → block size 48 / SR 48 kHz → `touch.Init(hw)` → 4
 
 ### Threading model (important)
 
-- **Two contexts, no locks.** The UI/MIDI code calls `String` setters from the main loop, while the audio ISR runs `String::Process`. The arpeggiator's note events fire **inside the audio ISR** (from `SynClock::Tick`). All shared state is plain fields; correctness relies on single-word writes being atomic on Cortex-M7 and on the code tolerating torn multi-field updates.
+- **Two contexts, no locks.** The UI/MIDI code calls `String` setters from the main loop, while the audio ISR runs `String::Process`. The arpeggiator's note events fire **inside the audio ISR** (from `SynClock::tick`). The clock itself is only touched in the ISR; the main loop posts requests (see [core-dsp.md §5.2](core-dsp.md#52-synclock-and-_process_clock)). Other shared state is plain fields; correctness relies on single-word writes being atomic on Cortex-M7 and on the code tolerating torn multi-field updates.
 - Do not allocate, block, or log from anything reachable from `String::Process` / `_on_clock_tick`.
 - `std::function` callbacks are bound once at init; never rebind at runtime.
 
@@ -69,7 +69,7 @@ lib/DaisySP         submodule (needs USE_DAISYSP_LGPL=1 for ReverbSc)
 2. **CPU budget:** 7 waveguide voices + ReverbSc per sample. `Vox`/`FastString` recompute expensive coefficients (`powf`, `atanf`) only on parameter change past thresholds and mark them `noinline`. Keep that pattern.
 3. **Voice ↔ pad identity.** Poly mode uses fixed voice = scale degree = pad (`voice i` ↔ `P(03+i)`); there is no voice allocator. Mono mode uses only `_vox[0]`.
 4. **Note numbers are scale-degree indices 0..6**, not MIDI note numbers.
-5. **No persistence.** Nothing is saved to flash/QSPI; all state resets on power-up (scale 0 Amara, octave 0, poly, tempo ≈115.5 BPM, reverb 0).
+5. **No persistence.** Nothing is saved to flash/QSPI; all state resets on power-up (scale 0 Amara, octave 0, poly, internal clock at 120 BPM, reverb 0).
 6. No tests, no host build. Verification = build with `make`, flash, play.
 
 ## Glossary

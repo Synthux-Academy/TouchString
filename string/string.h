@@ -31,33 +31,28 @@ public:
 
   void Init(const float sample_rate, const float buffer_size);
 
-  void SetTempo(const float tempo) { _clock.SetTempo(tempo); }
+  // Clock control. These are called from the main loop and only record
+  // requests; the clock itself is driven from the audio callback (_process_clock).
   void SetBpm(const float bpm);
   bool CheckBeatPulse() {
     bool p = _beat_pulse;
     _beat_pulse = false;
     return p;
   }
-  void SpeedUp() {
-    _tempo = std::min(_tempo + .05f, 1.f);
-    SetTempo(_tempo);
-  }
-  void SlowDown() {
-    _tempo = std::max(_tempo - .05f, .05f);
-    SetTempo(_tempo);
-  }
-  void ProcessClockIn(const bool state) { _clock.Process(state); }
+  void SpeedUp() { _bpm = std::min(_bpm + kBpmStep, kBpmMax); }
+  void SlowDown() { _bpm = std::max(_bpm - kBpmStep, kBpmMin); }
+
+  // External (MIDI) clock sync: explicit on/off, pulses counted per received clock message.
+  void SetExternalClock(const bool on) { _is_ext_clock = on; }
+  void ToggleExternalClock() { _is_ext_clock = !_is_ext_clock; }
+  bool IsExternalClock() const { return _is_ext_clock; }
+  void PushExternalClockPulse() { _ext_pulses_received = _ext_pulses_received + 1; }
 
   void SetArpOn(const bool value) {
     if (_is_arp_on != value) {
       Reset();
     }
     _is_arp_on = value;
-    if (_is_arp_on) {
-      if (!_clock.IsRunning()) _clock.Run();
-    } else {
-      _clock.Stop();
-    }
   }
 
   bool IsLatched() { return _latch.on(); }
@@ -150,7 +145,9 @@ public:
 private:
   NOCOPY(String)
 
-  void _on_clock_tick();
+  void _process_clock();
+  void _reset_rhythm();
+  void _on_clock_tick(const bool external);
   void _on_arp_note_on(uint8_t num, uint8_t vel);
   void _on_arp_note_off(uint8_t num);
 
@@ -163,10 +160,13 @@ private:
 
   static constexpr uint8_t kPPQN = 48;
   static constexpr uint8_t kPPQNExtern = 24;
+  static constexpr float kBpmMin = 40.f;
+  static constexpr float kBpmMax = 240.f;
+  static constexpr float kBpmStep = 10.f;
 
   Scale _scale;
   std::array<Vox, kVoicesCount> _vox;
-  SynClock _clock;
+  bleeptools::SynClock _clock;
   Trigger  _trigger;
   CPattern _pattern;
   Arp<kNotesCount, 4> _arp;
@@ -184,7 +184,16 @@ private:
   std::array<float, 2> _reverb_out;
   std::array<float, 2> _bus;
 
-  float _tempo;
+  float _bpm;
+  // Clock requests: written by the main loop, applied in the audio callback.
+  volatile bool _is_ext_clock;
+  volatile bool _tempo_sync_request;
+  volatile uint32_t _ext_pulses_received;
+  // Audio-callback-owned clock state.
+  uint32_t _ext_pulses_consumed;
+  uint32_t _blocks_since_ext_pulse;
+  uint32_t _ext_timeout_blocks;
+  bool _is_clock_started;
   float _brightness;
   float _structure;
   float _damping;

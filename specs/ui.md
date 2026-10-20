@@ -24,10 +24,11 @@ User-facing description of controls: [README.md](../README.md#controls). This sp
 
 | Pad | Plain | + TO (P10) held | + CH (P11) held | Release |
 |---|---|---|---|---|
-| P00 | Octave −1 (min −2); if P02 held → octave reset to 0 | `SlowDown()` (−0.05 tempo), blink(1,8,0) | Previous scale | — |
+| P00 | Octave −1 (min −2); if P02 held → octave reset to 0 | `SlowDown()` (−10 BPM, min 40), blink(1,8,0) | Previous scale | — |
 | P01 | Dampen/palm-mute (continuous, §4) | — | Toggle poly/mono | `SetDampenPad(false)` |
-| P02 | Octave +1 (max +2); if P00 held → reset | `SpeedUp()`, blink(1,8,0) | Next scale | — |
-| P03–P09 | `NoteOn(pad−3, vel)` — vel = `Pressure()` in Bow mode, else `Velocity()` | (same as plain) | Select scale `pad−3` directly | `NoteOff(pad−3)` |
+| P02 | Octave +1 (max +2); if P00 held → reset | `SpeedUp()` (+10 BPM, max 240), blink(1,8,0) | Next scale | — |
+| P03 | `NoteOn(0, vel)` | Toggle external MIDI clock sync (`ToggleExternalClock`); this touch is not a note until released (`_is_ext_sync_pad_held`) | Select scale 0 | `NoteOff(0)` (skipped after the sync gesture) |
+| P04–P09 | `NoteOn(pad−3, vel)` — vel = `Pressure()` in Bow mode, else `Velocity()` | (same as plain) | Select scale `pad−3` directly | `NoteOff(pad−3)` |
 | P10 (TO) | Tap tempo: interval 250–1500 ms → `SetBpm(60000/interval)` (40–240 BPM), blink(1,12,0) | modifier | — | — |
 | P11 (CH) | Modifier only | — | — | — |
 | P10+P11 | Hold > 120 ticks (~0.5 s) → `Pads::Recalibrate()`, blink(3,8,8); latched until one is released | | | |
@@ -70,6 +71,7 @@ Every tick: `SetExciterMode(mode)`, `SetLatch(pos == UP)`, `SetArpOn(pos != DOWN
 | `_was_arp_on` | Edge detect for step 7 |
 | `_last_to_touch_time` | ms timestamp of last P10 touch (tap tempo) |
 | `_recal_counter`, `_recal_latched` | Recalibration gesture |
+| `_is_ext_sync_pad_held` | P03 is held as part of TO + P03; `_is_note_pad_touched(0)` reports false so it's excluded from pressure routing and arp re-trigger. Cleared on release, or whenever P03 isn't touched (e.g. after recalibration) |
 
 ## 4. Pressure routing (step 8–9)
 
@@ -116,6 +118,7 @@ Beat = `String::CheckBeatPulse()` (every quarter note from the clock, and on tap
 | Mono / Poly | 2,10,10 / 1,28,0 |
 | Tempo up/down | 1,8,0 |
 | Valid tap | 1,12,0 |
+| External sync on / off | 4,5,5 / 1,50,0 |
 | Recalibrate | 3,8,8 |
 
 A new pattern replaces the running one.

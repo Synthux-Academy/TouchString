@@ -6,7 +6,14 @@ using namespace synthux;
 String::String():
 _trigger              { Trigger(kPPQN) },
 _dice                 { std::uniform_int_distribution<uint8_t>(0, 100) },
-_tempo                { .45f },
+_bpm                  { 120.f },
+_is_ext_clock         { false },
+_tempo_sync_request   { false },
+_ext_pulses_received  { 0 },
+_ext_pulses_consumed  { 0 },
+_blocks_since_ext_pulse { 0 },
+_ext_timeout_blocks   { 1000 },
+_is_clock_started     { false },
 _brightness           { 0.f },
 _structure            { 0.f },
 _damping              { 0.f },
@@ -52,9 +59,13 @@ void String::SetMono(const bool mono) {
 void String::Init(const float sample_rate, const float buffer_size) {
   using namespace std::placeholders;
 
-  _clock.Init(1e6 * buffer_size / sample_rate, kPPQNExtern, kPPQN);
-  auto on_clock = std::bind(&String::_on_clock_tick, this);
-  _clock.SetOnTick(on_clock);
+  _clock.init(static_cast<uint32_t>(1e6f * buffer_size / sample_rate), kPPQN);
+  _clock.set_ppqn_in(kPPQNExtern);
+  _clock.set_tempo(_bpm);
+  auto on_clock = std::bind(&String::_on_clock_tick, this, _1);
+  _clock.set_on_tick(on_clock);
+  // No external clock pulse for 1 s => consider the clock gone
+  _ext_timeout_blocks = static_cast<uint32_t>(sample_rate / buffer_size);
 
   auto on_latch_note_on = std::bind(&String::_on_latch_note_on, this, _1);
   auto on_latch_note_off = std::bind(&String::_on_latch_note_off, this, _1);
@@ -90,8 +101,6 @@ void String::Init(const float sample_rate, const float buffer_size) {
   _reverb.Init(sample_rate);
   _reverb.SetFeedback(kReverbFeedback);
   _reverb.SetLpFreq(kReverLPFreq);
-
-  SetTempo(_tempo);
 };
 
 void String::SetLatch(const bool on) {
@@ -100,11 +109,9 @@ void String::SetLatch(const bool on) {
 };
 
 void String::SetBpm(const float bpm) {
-  _clock.SetBpm(bpm);
-  const auto clock_off_offset = 10.0f;
-  _tempo = (daisysp::fclamp(bpm, 40.0f, 240.0f) - 40.0f + clock_off_offset) / (200.0f - clock_off_offset);
-  _tempo = daisysp::fclamp(_tempo, 0.05f, 1.0f);
-  _clock_tick_counter = 0;
+  _bpm = daisysp::fclamp(bpm, kBpmMin, kBpmMax);
+  // Realign the beat phase to the tap (applied in _process_clock)
+  _tempo_sync_request = true;
   _beat_pulse = true;
 }
 
@@ -274,10 +281,7 @@ void String::NoteOn(const uint8_t num, const float velocity) {
 
   _latch.note_on(num);
 
-  if (_arp.HasNote()) {
-    if (!_clock.IsRunning()) _clock.Run();
-  }
-  else {
+  if (!_arp.HasNote()) {
     Reset();
   }
 };
@@ -342,9 +346,6 @@ void String::NoteOff(const uint8_t num) {
 };
 
 void String::Reset() {
-  if (!_is_arp_on) {
-    _clock.Stop();
-  }
   _trigger.Reset();
   _pattern.Reset();
   _arp.Clear();
@@ -362,7 +363,7 @@ void String::Reset() {
 };
 
 void String::Process(const float * const *in, float **out, size_t size) {
-  _clock.Tick();
+  _process_clock();
   for (size_t i = 0; i < size; i++) {
     float ext_audio = 0.f;
     if (in != nullptr && _input_volume > 0.005f) {
@@ -404,7 +405,63 @@ void String::Process(const float * const *in, float **out, size_t size) {
   }
 };
 
-void String::_on_clock_tick() {
+void String::_reset_rhythm() {
+  _trigger.Reset();
+  _pattern.Reset();
+  _clock_tick_counter = 0;
+}
+
+// Called once per audio block. Applies clock requests from the main loop
+// and advances the clock, feeding at most one external pulse per block.
+void String::_process_clock() {
+  const bool ext = _is_ext_clock;
+  if (ext != _clock.external_clock()) {
+    _clock.stop();
+    _is_clock_started = false;
+    _clock.set_external_clock(ext);
+    _ext_pulses_consumed = _ext_pulses_received;
+    _blocks_since_ext_pulse = 0;
+    _reset_rhythm();
+  }
+
+  if (!ext) _clock.set_tempo(_bpm);
+
+  if (_tempo_sync_request) {
+    _tempo_sync_request = false;
+    _clock.reset();
+    _clock_tick_counter = 0;
+  }
+
+  // The clock runs while the arp is on. In external mode run() only arms it:
+  // ticking starts on the next external pulse.
+  if (_is_arp_on != _is_clock_started) {
+    _is_clock_started = _is_arp_on;
+    if (_is_arp_on) _clock.run(); else _clock.stop();
+  }
+
+  bool pulse = false;
+  if (ext) {
+    if (_ext_pulses_consumed != _ext_pulses_received) {
+      _ext_pulses_consumed++;
+      _blocks_since_ext_pulse = 0;
+      pulse = true;
+    }
+    else if (_is_clock_started && ++_blocks_since_ext_pulse > _ext_timeout_blocks) {
+      // External clock stopped: re-arm so the pattern restarts on its next pulse
+      _blocks_since_ext_pulse = 0;
+      _clock.stop();
+      _clock.run();
+      _reset_rhythm();
+    }
+  }
+  else {
+    _ext_pulses_consumed = _ext_pulses_received;
+  }
+
+  _clock.tick(pulse);
+}
+
+void String::_on_clock_tick(const bool /*external*/) {
   _clock_tick_counter = (_clock_tick_counter + 1) % kPPQN;
   if (_clock_tick_counter == 0) {
     _beat_pulse = true;
