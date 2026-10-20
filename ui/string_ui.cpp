@@ -71,6 +71,12 @@ void StringUI::Process(DaisySeed& hw) {
         auto initial_s35 = _touch.knobs().s35().Process();
         _human_string_value.SetTracking(initial_s35);
         _string.SetHumanStringChance(initial_s35);
+
+        _brightness_value.SetTracking(_touch.knobs().s30().Process());
+        _transp_value.SetTracking(_touch.knobs().s31().Process());
+        _structure_value.SetTracking(_touch.knobs().s32().Process());
+        _note_chance_value.SetTracking(_touch.knobs().s34().Process());
+        _damping_value.SetTracking(_touch.knobs().s37().Process());
     }
 
     // Arpeggiator (Switch 2 / Right switch) .....................
@@ -168,16 +174,18 @@ void StringUI::Process(DaisySeed& hw) {
         }
     }
 
+    // Single-layer knobs are always active; after a MIDI CC Set()
+    // they only take over again once physically moved.
     // Pitch (real-time) ..........................................
-    _string.SetTransp(_touch.knobs().s31().Process());
+    _string.SetTransp(_transp_value.Process(_touch.knobs().s31().Process(), true));
 
-    // Timbre (sample-and-hold at pluck time) .....................
-    _string.SetDamping(_touch.knobs().s37().Process());
-    _string.SetStructure(_touch.knobs().s32().Process());
-    _string.SetBrightness(_touch.knobs().s30().Process());
+    // Timbre (real-time) .........................................
+    _string.SetDamping(_damping_value.Process(_touch.knobs().s37().Process(), true));
+    _string.SetStructure(_structure_value.Process(_touch.knobs().s32().Process(), true));
+    _string.SetBrightness(_brightness_value.Process(_touch.knobs().s30().Process(), true));
 
     // Note randomization (arp only) ..............................
-    _string.SetHumanNoteChance(_touch.knobs().s34().Process());
+    _string.SetHumanNoteChance(_note_chance_value.Process(_touch.knobs().s34().Process(), true));
 
     // Human string chance <-> reverb mix .........................
     auto human_verb_knob_value = _touch.knobs().s35().Process();
@@ -346,16 +354,16 @@ void StringUI::_process_midi() {
                 auto ctrl_msg = msg.AsControlChange();
                 auto num = ctrl_msg.control_number;
                 auto norm_value = norm(ctrl_msg.value);
-                if (num == 70) { _string.SetBrightness(norm_value); }         // brightness
-                else if (num == 71) { _string.SetTransp(norm_value); }       // transpose
-                else if (num == 72) { _string.SetStructure(norm_value); }    // structure
+                if (num == 70) { _brightness_value.Set(norm_value); _string.SetBrightness(norm_value); }         // brightness
+                else if (num == 71) { _transp_value.Set(norm_value); _string.SetTransp(norm_value); }       // transpose
+                else if (num == 72) { _structure_value.Set(norm_value); _string.SetStructure(norm_value); }    // structure
                 else if (num == 73) { _pattern_value.Set(norm_value); _string.SetPattern(norm_value); }        // pattern
-                else if (num == 74) { _string.SetHumanNoteChance(norm_value); } // note randomization
+                else if (num == 74) { _note_chance_value.Set(norm_value); _string.SetHumanNoteChance(norm_value); } // note randomization
                 else if (num == 75) { _human_string_value.Set(norm_value); _string.SetHumanStringChance(norm_value); } // string randomization
-                else if (num == 76) { _string.SetDamping(norm_value); }      // damping
+                else if (num == 76) { _damping_value.Set(norm_value); _string.SetDamping(norm_value); }      // damping
                 else if (num == 77) { _verb_value.Set(norm_value); _string.SetReverbMix(norm_value); }          // reverb
                 else if (num == 78) { _shift_value.Set(norm_value); _string.SetPatternShift(norm_value); }      // pattern shift
-                else if (num == 79) { _string.SetDrive(norm_value); }        // drive
+                else if (num == 79) { _drive_value.Set(norm_value); _string.SetDrive(norm_value); }        // drive
                 else if (num == 123) { _string.Reset(); }
             }
             break;

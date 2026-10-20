@@ -135,6 +135,13 @@ private:
     Touch& _touch;
     String& _string;
 
+    // Single-layer knobs: soft takeover so MIDI CC values persist until the knob is moved
+    MValue _brightness_value;
+    MValue _transp_value;
+    MValue _structure_value;
+    MValue _note_chance_value;
+    MValue _damping_value;
+
     MValue _verb_value;
     MValue _human_string_value;
     MValue _pattern_value;

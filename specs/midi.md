@@ -16,21 +16,19 @@ MIDI is **USB-device, input-only**. Code: `StringUI::_process_midi()` in [ui/str
 
 | CC | Target | Persists? |
 |---|---|---|
-| 70 | `SetBrightness` | ❌ overwritten next tick by S30 |
-| 71 | `SetTransp` (pitch, ±12 st) | ❌ overwritten by S31 |
-| 72 | `SetStructure` (timbre) | ❌ overwritten by S32 |
-| 73 | `SetPattern` (density) + `_pattern_value.Set` | ✅ until S33 is moved (> 0.02) without TO |
-| 74 | `SetHumanNoteChance` | ❌ overwritten by S34 |
+| 70 | `SetBrightness` + `_brightness_value.Set` | ✅ until S30 is moved (> 0.02) |
+| 71 | `SetTransp` (pitch, ±12 st) + `_transp_value.Set` | ✅ until S31 is moved |
+| 72 | `SetStructure` (timbre) + `_structure_value.Set` | ✅ until S32 is moved |
+| 73 | `SetPattern` (density) + `_pattern_value.Set` | ✅ until S33 is moved without TO |
+| 74 | `SetHumanNoteChance` + `_note_chance_value.Set` | ✅ until S34 is moved |
 | 75 | `SetHumanStringChance` + `_human_string_value.Set` | ✅ until S35 is moved without TO |
-| 76 | `SetDamping` | ❌ overwritten by S37 |
+| 76 | `SetDamping` + `_damping_value.Set` | ✅ until S37 is moved |
 | 77 | `SetReverbMix` + `_verb_value.Set` | ✅ until TO + S35 is moved |
 | 78 | `SetPatternShift` + `_shift_value.Set` | ✅ until TO + S33 is moved |
-| 79 | `SetDrive` | ❌ overwritten by S36 (`_drive_value` keeps tracking the fader) |
+| 79 | `SetDrive` + `_drive_value.Set` | ✅ until S36 is moved without TO |
 | 123 | `String::Reset()` (All Notes Off) | — |
 
-"Overwritten" = the UI writes unlayered knob values to the engine every tick (see [ui.md §2.2](ui.md#22-knobs--faders)), so these CCs only cause a ≤ 4 ms blip. Only CCs routed through an `MValue::Set` (soft takeover) stick.
-
-**Fix pattern** if CC control is wanted for the others: give each of those knobs an `MValue` (always-active, `SetTracking` on first run) and have the CC call `.Set(v)`; or only forward a knob to the engine when it changed by more than a threshold since last tick.
+Every CC with a knob counterpart stores its value via `MValue::Set` (soft takeover, [ui.md §5](ui.md#5-soft-takeover--mvalue-uimvalueh)): the CC value holds until the knob (on the matching layer) moves more than 0.02 from where it was when the CC arrived; from then on the knob controls the parameter again. Knob positions are not changed or reported back, so the first knob movement may jump from the CC value to the knob position.
 
 ### 2.2 System Real-Time
 - `TimingClock` (0xF8) → `String::ProcessClockIn(true)` → `SynClock::Process` rising edge → `_external_clock_tick()`.

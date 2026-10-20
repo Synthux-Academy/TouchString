@@ -47,7 +47,7 @@ Octave multipliers: `{-2:0.25, -1:0.5, 0:1, +1:2, +2:4}` → `String::SetCurrent
 | S36 fader (left) | A6 | `SetDrive` (volume/soft/drive) via `_drive_value` | `SetInputVolume` via `_in_vol_value` |
 | S37 fader (right) | A7 | `SetDamping` | — |
 
-Unlayered controls (S30, S31, S32, S34, S37) are written to the engine **every tick**, so anything else setting those parameters (e.g. MIDI CC) is overwritten within ~4 ms.
+Every knob goes through an `MValue` (§5). Single-layer knobs (S30, S31, S32, S34, S37) use an always-active `MValue`, so they behave like plain knobs but a MIDI CC value persists until the knob is physically moved.
 
 ### 2.3 Switches (`Switch3`: `POS_UP` / `POS_CENTER` / `POS_DOWN`)
 
@@ -94,6 +94,8 @@ Used where one physical control has two layers (plain / +TO). Each layer has its
 - `SetTracking(v)`: start already tracking (used at first tick so base layers match knob positions on boot).
 - `Set(v)`: store a value without tracking (used by MIDI CC so the knob must move before overriding).
 
+Single-layer (always active): S30 `_brightness_value`, S31 `_transp_value`, S32 `_structure_value`, S34 `_note_chance_value`, S37 `_damping_value`.
+
 Pairs: S33 `_pattern_value`/`_shift_value`, S35 `_human_string_value`/`_verb_value`, S36 `_drive_value`/`_in_vol_value`. Boot values of the TO layers: shift 0, reverb 0, input volume 0.
 
 ## 6. LED
@@ -123,13 +125,12 @@ A new pattern replaces the running one.
 - **New pad gesture**: add a branch in `_on_pad_touch` (and `_on_pad_release` if needed). Remember callbacks see last tick's modifier flags; query `_touch.pads().IsTouched(n)` for the current state.
 - **New shifted knob layer**: add an `MValue` member pair, call both `Process` with complementary `active` each tick, and `SetTracking` the base one on first run.
 - **New LED feedback**: call `_trigger_blink_pattern`; keep patterns distinguishable from existing ones (§6).
-- **New engine parameter**: add setter in `String` (normalised 0..1), call it in `Process` step 10; optionally add a MIDI CC ([midi.md](midi.md)).
+- **New engine parameter**: add setter in `String` (normalised 0..1), feed it through an `MValue` in `Process` step 10 (`SetTracking` on first run); if adding a MIDI CC, call that `MValue`'s `Set(v)` in `_process_midi` ([midi.md](midi.md)).
 
 ## 8. Known issues / discrepancies
 
 - README says "S37 (Hold TO: Reverb Mix)": not implemented — reverb is only on TO + S35.
 - Pressing TO (P10) as a modifier also counts as a tap; two TO presses 250–1500 ms apart change the tempo.
 - Modifier flags lag one tick behind pad callbacks; pressing TO/CH and a target pad in the same ~4 ms tick is treated as unmodified.
-- `Process` comment "Timbre (sample-and-hold at pluck time)" is stale: brightness/structure/damping are applied live.
 - `Knobs` are initialised with `hw.AudioCallbackRate()` (1 kHz) but processed at ~250 Hz, so the `AnalogControl` slew is ~4× slower than its nominal 2 ms (harmless, but wrong if you rely on it).
 - `kNotesCount = 8` in `StringUI` is unused.
