@@ -2,9 +2,6 @@
 
 Polyphonic physical modeling string synthesizer for the Synthux Touch synthesizer and Daisy Seed.
 
-## Quick Install
-Flash the precompiled [**TouchString.bin** (v2.1.0)](https://github.com/vincentltm/TouchString/releases/download/v2.1.0/TouchString.bin) directly using the [Daisy Seed web programmer](https://flash.daisy.audio/).
-
 ## Controls
 
 <img src="touch.jpeg" width="300"/>
@@ -85,6 +82,26 @@ The onboard LED provides rich visual feedback:
 - **Tap Tempo**: Flashes instantly on valid taps to confirm tempo sync.
 - **Clock Source**: 4 quick blinks = external MIDI clock sync on, 1 long blink = back to internal clock.
 - **Recalibration**: 3 rapid blinks confirm capacitive sensor baseline reset.
+
+### MIDI
+TouchString appears as a USB MIDI device when connected via the Daisy Seed's USB port. It listens on all MIDI channels.
+
+| CC | Control |
+|---|---|
+| 70 | S30 **Brightness** |
+| 71 | S31 **Pitch** |
+| 72 | S32 **Timbre** |
+| 73 | S33 **Density** |
+| 74 | S34 **Notes** |
+| 75 | S35 **String** |
+| 76 | S37 **Damp** |
+| 77 | **Reverb Mix** (TO + S35) |
+| 78 | **Pattern Shift** (TO + S33) |
+| 79 | S36 **Drive / Volume** |
+| 123 | All Notes Off (stops all strings and clears the arpeggiator) |
+
+- **Soft Takeover**: A value set via MIDI CC is kept until the corresponding knob or fader is moved; from then on the physical control takes over again.
+- **MIDI Clock Sync**: Hold P10 + P03 to toggle external MIDI clock sync. When on, the arpeggiator follows incoming MIDI clock and starts on the next clock pulse; if the clock stops for more than a second, the pattern restarts with the next pulse.
 
 ## Project Structure
 ```
